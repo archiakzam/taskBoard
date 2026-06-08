@@ -98,3 +98,32 @@ void TaskBoardModel::renameTask(int projectIdx, int taskIdx, const QString &newN
     projects[projectIdx].renameTask(taskIdx, newName);
     emit dataChanged();
 }
+
+bool TaskBoardModel::canAddTaskToProject(int projectIdx, const Task &task) const {
+    if (projectIdx < 0 || projectIdx >= projects.size()) return false;
+    return projects[projectIdx].canAddTask(task);
+}
+
+bool TaskBoardModel::moveTask(int fromProjectIdx, int taskIdx, int toProjectIdx,
+                              const QDateTime &newStart, const QDateTime &newEnd) {
+    if (fromProjectIdx < 0 || fromProjectIdx >= projects.size()) return false;
+    if (toProjectIdx < 0 || toProjectIdx >= projects.size()) return false;
+    if (taskIdx < 0 || taskIdx >= projects[fromProjectIdx].tasks.size()) return false;
+
+    Task task = projects[fromProjectIdx].tasks[taskIdx];
+    Task movedTask = task;
+    movedTask.start = newStart;
+    movedTask.end = newEnd;
+
+    if (!projects[toProjectIdx].canAddTask(movedTask)) return false;
+
+    projects[fromProjectIdx].removeTask(taskIdx);
+    projects[toProjectIdx].addTask(movedTask);
+    emit dataChanged();
+    return true;
+}
+
+void TaskBoardModel::clearProjects() {
+    projects.clear();
+    emit dataChanged();
+}

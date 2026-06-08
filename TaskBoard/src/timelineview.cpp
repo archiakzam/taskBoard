@@ -1,12 +1,14 @@
 #include "include/timelineview.h"
 #include "include/graphicstaskitem.h"
 #include "include/projectheaderitem.h"
+#include "include/taskboardserializer.h"
 #include <QScrollBar>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QMouseEvent>
+#include <QFileDialog>
 
 TimelineView::TimelineView(TaskBoardModel *model, QWidget *parent)
     : QWidget(parent), model(model), pixelsPerHour(50.0), tempTask(nullptr)
@@ -31,18 +33,31 @@ TimelineView::TimelineView(TaskBoardModel *model, QWidget *parent)
     connect(topView->horizontalScrollBar(), &QScrollBar::valueChanged,
             bottomView->horizontalScrollBar(), &QScrollBar::setValue);
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->addWidget(topView);
-    layout->addWidget(bottomView);
-    layout->setSpacing(0);
-    layout->setContentsMargins(0,0,0,0);
+    mainLayout = new QVBoxLayout(this);
+    mainLayout->addWidget(topView);
+    mainLayout->addWidget(bottomView);
+    mainLayout->setSpacing(0);
+    mainLayout->setContentsMargins(0,0,0,0);
 
-    QPushButton *addProjectBtn = new QPushButton("+ Добавить проект");
-    layout->insertWidget(0, addProjectBtn);
-    connect(addProjectBtn, &QPushButton::clicked, this, &TimelineView::onAddProject);
+    setupToolbar();
 
     connect(model, &TaskBoardModel::dataChanged, this, &TimelineView::refresh, Qt::QueuedConnection);
     refresh();
+}
+void TimelineView::setupToolbar() {
+    QPushButton *addProjectBtn = new QPushButton("+ Добавить проект");
+    QPushButton *saveBtn = new QPushButton("Сохранить");
+    QPushButton *loadBtn = new QPushButton("Загрузить");
+    QHBoxLayout *buttonLayout = new QHBoxLayout();
+    buttonLayout->addWidget(addProjectBtn);
+    buttonLayout->addWidget(saveBtn);
+    buttonLayout->addWidget(loadBtn);
+    buttonLayout->addStretch();
+    mainLayout->insertLayout(0, buttonLayout);
+
+    connect(addProjectBtn, &QPushButton::clicked, this, &TimelineView::onAddProject);
+    connect(saveBtn, &QPushButton::clicked, this, &TimelineView::onSave);
+    connect(loadBtn, &QPushButton::clicked, this, &TimelineView::onLoad);
 }
 
 void TimelineView::syncHorizontalScrollbars(int value) {
@@ -51,7 +66,14 @@ void TimelineView::syncHorizontalScrollbars(int value) {
 
 void TimelineView::refresh() {
     deleteTempTask();
+    clearScenes();
+    setupSceneRects();
+    drawTopGrid();
+    drawBottomGrid();
+    drawProjectsAndTasks();
+}
 
+void TimelineView::clearScenes() {
     for (auto items : taskItems) {
         for (auto item : items) {
             bottomScene->removeItem(item);
@@ -64,27 +86,56 @@ void TimelineView::refresh() {
         delete header;
     }
     projectHeaders.clear();
-
     topScene->clear();
     bottomScene->clear();
+}
 
+void TimelineView::setupSceneRects() {
     double totalWidth = LEFT_MARGIN + 24 * pixelsPerHour + 50;
     double totalHeight = model->projectCount() * ROW_HEIGHT;
     bottomScene->setSceneRect(0, 0, totalWidth, totalHeight);
     topScene->setSceneRect(0, 0, totalWidth, 40);
+}
 
+void TimelineView::drawTopGrid() {
+    double pixelsPerQuarter = pixelsPerHour / 4.0;
+    QPen hourPen(Qt::black, 2);
+    QPen minutePen(Qt::gray, 1);
     for (int hour = 0; hour <= 24; ++hour) {
         double x = LEFT_MARGIN + hour * pixelsPerHour;
         QDateTime dt = sceneStartTime.addSecs(hour * 3600);
-        QGraphicsLineItem *line = topScene->addLine(x, 0, x, 20, QPen(Qt::gray));
+        topScene->addLine(x, 0, x, 40, hourPen);
         QGraphicsTextItem *text = topScene->addText(dt.toString("HH:00"));
         text->setPos(x + 2, 2);
-        if (hour % 4 == 0)
-            line->setPen(QPen(Qt::black, 2));
+        if (hour < 24) {
+            for (int q = 1; q <= 3; ++q) {
+                double xm = x + q * pixelsPerQuarter;
+                topScene->addLine(xm, 25, xm, 40, minutePen);
+            }
+        }
     }
+}
 
+void TimelineView::drawBottomGrid() {
+    double pixelsPerQuarter = pixelsPerHour / 4.0;
+    QPen hourPen(Qt::gray, 1.5);
+    QPen minutePen(Qt::lightGray, 1, Qt::DashLine);
+    for (int hour = 0; hour <= 24; ++hour) {
+        double x = LEFT_MARGIN + hour * pixelsPerHour;
+        bottomScene->addLine(x, 0, x, bottomScene->height(), hourPen);
+        if (hour < 24) {
+            for (int q = 1; q <= 3; ++q) {
+                double xm = x + q * pixelsPerQuarter;
+                bottomScene->addLine(xm, 0, xm, bottomScene->height(), minutePen);
+            }
+        }
+    }
+}
+
+void TimelineView::drawProjectsAndTasks() {
+    double totalWidth = LEFT_MARGIN + 24 * pixelsPerHour + 50;
     for (int p = 0; p < model->projectCount(); ++p) {
-        double y =p * ROW_HEIGHT;
+        double y = p * ROW_HEIGHT;
         bottomScene->addRect(0, y, totalWidth, ROW_HEIGHT-10, QPen(Qt::lightGray), QBrush(QColor(240, 240, 240)));
 
         ProjectHeaderItem *header = new ProjectHeaderItem(p, model);
@@ -93,10 +144,9 @@ void TimelineView::refresh() {
         projectHeaders.append(header);
         bottomScene->addLine(LEFT_MARGIN, y + ROW_HEIGHT-10, totalWidth, y + ROW_HEIGHT-10, QPen(Qt::gray));
 
-        // Задачи
         const QList<Task> &tasks = model->tasks(p);
         for (int t = 0; t < tasks.size(); ++t) {
-            GraphicsTaskItem *item = new GraphicsTaskItem(tasks[t], p, t, model, nullptr, false);
+            GraphicsTaskItem *item = new GraphicsTaskItem(tasks[t], p, t, model, this, false);
             item->setViewParams(sceneStartTime, pixelsPerHour);
             item->updateGeometry(sceneStartTime, pixelsPerHour);
             item->setPos(LEFT_MARGIN, y);
@@ -118,7 +168,6 @@ void TimelineView::onAddProject() {
         }, Qt::QueuedConnection);
     }
 }
-
 void TimelineView::mouseDoubleClickEvent(QMouseEvent *event) {
     QPoint viewPos = bottomView->mapFromGlobal(event->globalPos());
     if (!bottomView->rect().contains(viewPos)) {
@@ -133,17 +182,17 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event) {
         QWidget::mouseDoubleClickEvent(event);
         return;
     }
-    double x = scenePos.x() - LEFT_MARGIN;
-    if (x < 0) x = 0;
-    if (x > 24 * pixelsPerHour) x = 24 * pixelsPerHour;
-    qint64 hourOffset = qRound64(x / pixelsPerHour);
-    if (hourOffset < 0) hourOffset = 0;
-    if (hourOffset > 23) hourOffset = 23;
-    QDateTime start = sceneStartTime.addSecs(hourOffset * 3600);
+    QDateTime start = getTimeFromScenePos(scenePos);
     QDateTime end = start.addSecs(3600);
-
     deleteTempTask();
     createTempTask(projectIdx, start, end);
+}
+QDateTime TimelineView::getTimeFromScenePos(const QPointF &scenePos) const {
+    double x = scenePos.x() - LEFT_MARGIN;
+    x = qBound(0.0, x, 24.0 * pixelsPerHour);
+    qint64 hourOffset = qRound64(x / pixelsPerHour);
+    hourOffset = qBound(0LL, hourOffset, 23LL);
+    return sceneStartTime.addSecs(hourOffset * 3600);
 }
 
 void TimelineView::createTempTask(int projectIdx, const QDateTime &start, const QDateTime &end) {
@@ -179,4 +228,29 @@ void TimelineView::cancelTempTask(GraphicsTaskItem *item) {
         delete tempTask;
         tempTask = nullptr;
     }
+}
+
+int TimelineView::getProjectIndexAtY(double sceneY) const {
+    int idx = static_cast<int>(sceneY / ROW_HEIGHT);
+    if (idx >= 0 && idx < model->projectCount()) return idx;
+    return -1;
+}
+void TimelineView::onSave() {
+    QString fileName = QFileDialog::getSaveFileName(this, "Сохранить таск-борд", "",
+                                                    "JSON files (*.json);;All files (*)");
+    if (fileName.isEmpty()) return;
+    if (!TaskBoardSerializer::saveToFile(*model, fileName))
+        QMessageBox::warning(this, "Ошибка", "Не удалось сохранить файл!");
+    else
+        QMessageBox::information(this, "Успех", "Таск-борд сохранён.");
+}
+
+void TimelineView::onLoad() {
+    QString fileName = QFileDialog::getOpenFileName(this, "Загрузить таск-борд", "",
+                                                    "JSON files (*.json);;All files (*)");
+    if (fileName.isEmpty()) return;
+    if (!TaskBoardSerializer::loadFromFile(*model, fileName))
+        QMessageBox::warning(this, "Ошибка", "Не удалось загрузить файл!");
+    else
+        QMessageBox::information(this, "Успех", "Таск-борд загружен.");
 }

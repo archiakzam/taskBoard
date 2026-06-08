@@ -11,9 +11,10 @@
 class TaskBoardModel;
 class TimelineView;
 
+
 class GraphicsTaskItem : public QGraphicsRectItem {
 public:
-    enum ResizeHandle { NoHandle, LeftHandle, RightHandle };
+    enum ResizeHandle { NoHandle, LeftHandle, RightHandle, MoveHandle };
 
     GraphicsTaskItem(const Task &task, int projId, int taskId, TaskBoardModel *model,
                      TimelineView *view, bool isTemporary = false, QGraphicsItem *parent = nullptr);
@@ -44,9 +45,20 @@ private:
     void setCursorForHandle(ResizeHandle handle);
     bool isWithinDayBoundary(const QDateTime &start, const QDateTime &end) const;
 
+    void handleResize(double deltaHours);
+    void handleMove(QGraphicsSceneMouseEvent *event, double deltaHours);
+    void applyResize(const QDateTime &newStart, const QDateTime &newEnd);
+    void applyMove(int newProjectIdx, const QDateTime &newStart, const QDateTime &newEnd);
+
     Task taskData;
     int projectId;
     int taskId;
+
+    int originalProjectId;
+
+    int originalTaskId;
+    int targetProjectId;
+
     TaskBoardModel *model;
     TimelineView *timelineView;
     QRectF lastRect;

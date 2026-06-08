@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\TaskBoard.dir/objects.a
+D:\Qt5.12.10\Tools\mingw730_32\bin\ar.exe qc CMakeFiles\TaskBoard.dir/objects.a @CMakeFiles\TaskBoard.dir\objects1.rsp
+D:\Qt5.12.10\Tools\mingw730_32\bin\g++.exe -g -Wl,--whole-archive CMakeFiles\TaskBoard.dir/objects.a -Wl,--no-whole-archive -o TaskBoard.exe -Wl,--out-implib,libTaskBoard.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\TaskBoard.dir\linkLibs.rsp

@@ -45,6 +45,10 @@ public:
     void removeTask(int projectIdx, int taskIdx);
     void renameTask(int projectIdx, int taskIdx, const QString &newName);
 
+    bool moveTask(int fromProjectIdx, int taskIdx, int toProjectIdx, const QDateTime &newStart, const QDateTime &newEnd);
+    bool canAddTaskToProject(int projectIdx, const Task &task) const;
+
+    void clearProjects();
 signals:
     void dataChanged();
 };

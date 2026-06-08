@@ -40,7 +40,8 @@ else()
     src/main.cpp
     include/taskboard.h
     src/taskboard.cpp
-
+    src/taskboardserializer.cpp
+    include/taskboardserializer.h
     include/graphicstaskitem.h
     src/graphicstaskitem.cpp
 

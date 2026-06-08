@@ -1,0 +1,3 @@
+# Hashes of file build rules.
+0f1f3b2b47ff133051dde86c21ab4c44 CMakeFiles/TaskBoard_autogen
+11ac53eee82c2ee879102a6f4af607f1 D:/taskBoard1/TaskBoard/TaskBoard_ru_RU.ts

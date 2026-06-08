@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include "taskboard.h"
 #include <QMouseEvent>
+#include<QVBoxLayout>
 
 class GraphicsTaskItem;
 class ProjectHeaderItem;
@@ -15,8 +16,13 @@ class TimelineView : public QWidget {
     Q_OBJECT
 public:
     explicit TimelineView(TaskBoardModel *model, QWidget *parent = nullptr);
+
     void commitTempTask(GraphicsTaskItem *item);
     void cancelTempTask(GraphicsTaskItem *item);
+
+    int getProjectIndexAtY(double sceneY) const;
+    int getRowHeight() const { return ROW_HEIGHT; }
+    int getLeftMargin() const { return LEFT_MARGIN; }
 
 protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
@@ -24,16 +30,26 @@ protected:
 private slots:
     void refresh();
     void onAddProject();
+    void onSave();
+    void onLoad();
     void syncHorizontalScrollbars(int value);
 
 private:
+    void setupToolbar();
     void createTempTask(int projectIdx, const QDateTime &start, const QDateTime &end);
     void deleteTempTask();
+    void clearScenes();
+    void setupSceneRects();
+    void drawTopGrid();
+    void drawBottomGrid();
+    void drawProjectsAndTasks();
+    QDateTime getTimeFromScenePos(const QPointF &scenePos) const;
     QGraphicsView *topView;
     QGraphicsView *bottomView;
     QGraphicsScene *topScene;
     QGraphicsScene *bottomScene;
 
+    QVBoxLayout *mainLayout;
     TaskBoardModel *model;
     QDateTime sceneStartTime;
     double pixelsPerHour;
@@ -46,4 +62,4 @@ private:
     static const int ROW_HEIGHT = 60;
 };
 
-#endif
+#endif // TIMELINEVIEW_H

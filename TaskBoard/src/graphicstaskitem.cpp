@@ -9,7 +9,7 @@ GraphicsTaskItem::GraphicsTaskItem(const Task &task, int projId, int taskId, Tas
                                    TimelineView *view, bool isTemporary, QGraphicsItem *parent)
     : QGraphicsRectItem(parent), taskData(task), projectId(projId), taskId(taskId),
       model(model), timelineView(view), activeHandle(NoHandle), pixelsPerHour(50.0),
-      temporary(isTemporary)
+      temporary(isTemporary), originalProjectId(projId), originalTaskId(taskId), targetProjectId(projId)
 {
     if (temporary) {
         setBrush(QBrush(QColor(200, 200, 100, 150)));
@@ -25,13 +25,20 @@ GraphicsTaskItem::GraphicsTaskItem(const Task &task, int projId, int taskId, Tas
 void GraphicsTaskItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
     QPointF pos = event->pos();
     ResizeHandle handle = handleAt(pos);
-    if (handle != NoHandle) {
+    switch (handle) {
+    case LeftHandle:
+    case RightHandle:
         setCursor(Qt::SizeHorCursor);
-    } else {
+        break;
+    case MoveHandle:
+        setCursor(Qt::SizeAllCursor);
+        break;
+    default:
         setCursor(Qt::ArrowCursor);
     }
     QGraphicsRectItem::hoverMoveEvent(event);
 }
+
 void GraphicsTaskItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) {
     Q_UNUSED(option);
     Q_UNUSED(widget);
@@ -77,7 +84,7 @@ GraphicsTaskItem::ResizeHandle GraphicsTaskItem::handleAt(const QPointF &pos) co
     int grabWidth = 10;
     if (pos.x() <= rect.left() + grabWidth) return LeftHandle;
     if (pos.x() >= rect.right() - grabWidth) return RightHandle;
-    return NoHandle;
+    return MoveHandle;
 }
 
 void GraphicsTaskItem::setCursorForHandle(ResizeHandle handle) {
@@ -85,6 +92,9 @@ void GraphicsTaskItem::setCursorForHandle(ResizeHandle handle) {
     case LeftHandle:
     case RightHandle:
         setCursor(Qt::SizeHorCursor);
+        break;
+    case MoveHandle:
+        setCursor(Qt::SizeAllCursor);
         break;
     default:
         setCursor(Qt::ArrowCursor);
@@ -102,9 +112,12 @@ void GraphicsTaskItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
     activeHandle = handleAt(pos);
     if (activeHandle != NoHandle) {
         setCursorForHandle(activeHandle);
-        dragStartPos = pos;
+        dragStartPos = event->pos();
         originalStart = taskData.start;
         originalEnd = taskData.end;
+        originalProjectId = projectId;
+        originalTaskId = taskId;
+        targetProjectId = projectId;
         event->accept();
     } else {
         QGraphicsRectItem::mousePressEvent(event);
@@ -118,19 +131,29 @@ void GraphicsTaskItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
     }
     QPointF delta = event->pos() - dragStartPos;
     double deltaHours = delta.x() / pixelsPerHour;
+
+    if (activeHandle == LeftHandle || activeHandle == RightHandle)
+        handleResize(deltaHours);
+    else if (activeHandle == MoveHandle)
+        handleMove(event, deltaHours);
+}
+
+void GraphicsTaskItem::handleResize(double deltaHours) {
     QDateTime newStart = originalStart;
     QDateTime newEnd = originalEnd;
-
     if (activeHandle == LeftHandle) {
         newStart = originalStart.addSecs(qRound(deltaHours * 3600));
-        if (!isWithinDayBoundary(newStart, newEnd)) return;
-        if (newStart >= newEnd) return;
+        if (!isWithinDayBoundary(newStart, originalEnd) || newStart >= originalEnd) return;
+        newEnd = originalEnd;
     } else if (activeHandle == RightHandle) {
         newEnd = originalEnd.addSecs(qRound(deltaHours * 3600));
-        if (!isWithinDayBoundary(newStart, newEnd)) return;
-        if (newEnd <= newStart) return;
+        if (!isWithinDayBoundary(originalStart, newEnd) || newEnd <= originalStart) return;
+        newStart = originalStart;
     }
+    applyResize(newStart, newEnd);
+}
 
+void GraphicsTaskItem::applyResize(const QDateTime &newStart, const QDateTime &newEnd) {
     if (temporary) {
         taskData.start = newStart;
         taskData.end = newEnd;
@@ -144,10 +167,60 @@ void GraphicsTaskItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
     }
 }
 
+void GraphicsTaskItem::handleMove(QGraphicsSceneMouseEvent *event, double deltaHours) {
+    QDateTime newStart = originalStart.addSecs(qRound(deltaHours * 3600));
+    QDateTime newEnd = originalEnd.addSecs(qRound(deltaHours * 3600));
+    if (!isWithinDayBoundary(newStart, newEnd)) return;
+
+    int newProjectIdx = timelineView ? timelineView->getProjectIndexAtY(event->scenePos().y()) : -1;
+    if (newProjectIdx < 0) newProjectIdx = projectId;
+    applyMove(newProjectIdx, newStart, newEnd);
+}
+
+void GraphicsTaskItem::applyMove(int newProjectIdx, const QDateTime &newStart, const QDateTime &newEnd) {
+    if (temporary) {
+        taskData.start = newStart;
+        taskData.end = newEnd;
+        if (newProjectIdx != projectId) projectId = newProjectIdx;
+        updateGeometry(sceneStartTime, pixelsPerHour);
+        double y = projectId * timelineView->getRowHeight();
+        setPos(timelineView->getLeftMargin(), y);
+    } else {
+        taskData.start = newStart;
+        taskData.end = newEnd;
+        if (newProjectIdx != projectId) {
+            projectId = newProjectIdx;
+        }
+        targetProjectId = newProjectIdx;
+        updateGeometry(sceneStartTime, pixelsPerHour);
+        double y = projectId * timelineView->getRowHeight();
+        setPos(timelineView->getLeftMargin(), y);
+
+        setZValue(1);
+        if (scene()) scene()->update();
+    }
+}
 void GraphicsTaskItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event) {
     if (activeHandle != NoHandle) {
-        if (taskData.start != originalStart || taskData.end != originalEnd) {
-            if (!temporary) {
+        bool changed = (taskData.start != originalStart || taskData.end != originalEnd || projectId != originalProjectId);
+        if (changed && !temporary) {
+            if (activeHandle == MoveHandle) {
+                bool success;
+                if (targetProjectId == originalProjectId) {
+                    success = model->resizeTask(originalProjectId, originalTaskId, taskData.start, taskData.end);
+                } else {
+                    success = model->moveTask(originalProjectId, originalTaskId, targetProjectId, taskData.start, taskData.end);
+                }
+                if (!success) {
+                    taskData.start = originalStart;
+                    taskData.end = originalEnd;
+                    targetProjectId = originalProjectId;
+                    projectId = originalProjectId;
+                    updateGeometry(sceneStartTime, pixelsPerHour);
+                    double y = originalProjectId * timelineView->getRowHeight();
+                    setPos(timelineView->getLeftMargin(), y);
+                }
+            } else {
                 if (!model->resizeTask(projectId, taskId, taskData.start, taskData.end)) {
                     taskData.start = originalStart;
                     taskData.end = originalEnd;
@@ -157,6 +230,7 @@ void GraphicsTaskItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event) {
         }
         activeHandle = NoHandle;
         setCursor(Qt::ArrowCursor);
+        setZValue(0);
         event->accept();
     } else {
         QGraphicsRectItem::mouseReleaseEvent(event);
