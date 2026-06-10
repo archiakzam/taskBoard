@@ -3,6 +3,7 @@
 #include <QMenu>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QPainter>
 
 ProjectHeaderItem::ProjectHeaderItem(int projectIdx, TaskBoardModel *model, QGraphicsItem *parent)
     : QGraphicsRectItem(parent), projectId(projectIdx), model(model)
@@ -10,9 +11,27 @@ ProjectHeaderItem::ProjectHeaderItem(int projectIdx, TaskBoardModel *model, QGra
     setRect(0, 0, 150, 50);
     setBrush(QBrush(QColor(230, 230, 230)));
     setPen(QPen(Qt::lightGray));
-    label = new QGraphicsTextItem(model->projectName(projectIdx), this);
-    label->setPos(10, 15);
     setFlag(QGraphicsItem::ItemIsSelectable);
+}
+
+void ProjectHeaderItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) {
+    Q_UNUSED(option);
+    Q_UNUSED(widget);
+
+    painter->setBrush(brush());
+    painter->setPen(pen());
+    painter->drawRect(rect());
+
+    painter->setPen(Qt::black);
+    QFont font = painter->font();
+    font.setPointSize(10);
+    painter->setFont(font);
+
+    QRectF textRect = rect().adjusted(5, 0, -5, 0);
+    QString projectName = model->projectName(projectId);
+    QString elidedText = painter->fontMetrics().elidedText(projectName, Qt::ElideRight, textRect.width());
+
+    painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, elidedText);
 }
 
 void ProjectHeaderItem::updatePosition(double y) {

@@ -7,10 +7,17 @@
 #include <QPushButton>
 #include "taskboard.h"
 #include <QMouseEvent>
-#include<QVBoxLayout>
+#include <QVBoxLayout>
 
 class GraphicsTaskItem;
 class ProjectHeaderItem;
+
+struct TimeScaleStep {
+    double intervalHours;
+    int subDivisions;
+    QString format;
+    int minLabelSpacePx;
+};
 
 class TimelineView : public QWidget {
     Q_OBJECT
@@ -26,6 +33,8 @@ public:
 
 protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private slots:
     void refresh();
@@ -44,6 +53,9 @@ private:
     void drawBottomGrid();
     void drawProjectsAndTasks();
     QDateTime getTimeFromScenePos(const QPointF &scenePos) const;
+
+    TimeScaleStep calculateTimeScaleStep(double pixelsPerHour) const;
+
     QGraphicsView *topView;
     QGraphicsView *bottomView;
     QGraphicsScene *topScene;
@@ -60,6 +72,8 @@ private:
 
     static const int LEFT_MARGIN = 150;
     static const int ROW_HEIGHT = 60;
+    static const double MIN_PIXELS_PER_HOUR;
+    static const double MAX_PIXELS_PER_HOUR;
 };
 
 #endif // TIMELINEVIEW_H

@@ -9,6 +9,12 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QFileDialog>
+#include <QWheelEvent>
+#include<QPointF>
+#include <QResizeEvent>
+
+const double TimelineView::MIN_PIXELS_PER_HOUR = 30.0;
+const double TimelineView::MAX_PIXELS_PER_HOUR = 200.0;
 
 TimelineView::TimelineView(TaskBoardModel *model, QWidget *parent)
     : QWidget(parent), model(model), pixelsPerHour(50.0), tempTask(nullptr)
@@ -44,6 +50,7 @@ TimelineView::TimelineView(TaskBoardModel *model, QWidget *parent)
     connect(model, &TaskBoardModel::dataChanged, this, &TimelineView::refresh, Qt::QueuedConnection);
     refresh();
 }
+
 void TimelineView::setupToolbar() {
     QPushButton *addProjectBtn = new QPushButton("+ Добавить проект");
     QPushButton *saveBtn = new QPushButton("Сохранить");
@@ -97,43 +104,87 @@ void TimelineView::setupSceneRects() {
     topScene->setSceneRect(0, 0, totalWidth, 40);
 }
 
+TimeScaleStep TimelineView::calculateTimeScaleStep(double pph) const {
+    double targetPx = 100.0;
+    double rawHours = targetPx / pph;
+
+    if (pph >= 80.0) {
+        if (rawHours <= 0.25)  return {0.25, 2, "HH:mm", 60};
+        if (rawHours <= 0.5)   return {0.5,  1, "HH:mm", 70};
+        return {1.0, 3, "HH:mm", 90};
+    }
+    else if (pph >= 20.0) {
+        if (rawHours <= 2.0)   return {2.0, 3, "H'h'", 80};
+        if (rawHours <= 4.0)   return {4.0, 3, "H'h'", 90};
+        return {6.0, 2, "H'h'", 100};
+    }
+    else if (pph >= 5.0) {
+        if (rawHours <= 12.0)  return {12.0, 2, "H'h'", 100};
+        return {24.0, 4, "dd MMM", 120};
+    }
+    else {
+        if (rawHours <= 48.0)  return {48.0, 2, "dd MMM", 120};
+        if (rawHours <= 168.0) return {168.0, 6, "dd MMM", 150};
+        return {336.0, 7, "MMM dd", 200};
+    }
+}
+
 void TimelineView::drawTopGrid() {
-    double pixelsPerQuarter = pixelsPerHour / 4.0;
-    QPen hourPen(Qt::black, 2);
-    QPen minutePen(Qt::gray, 1);
-    for (int hour = 0; hour <= 24; ++hour) {
+    TimeScaleStep step = calculateTimeScaleStep(pixelsPerHour);
+    double totalHours = 24.0;
+    double subStep = step.intervalHours / step.subDivisions;
+
+    QPen mainPen(Qt::black, 2);
+    QPen subPen(Qt::gray, 1);
+    double lastLabelX = -1e9;
+
+    for (double hour = 0.0; hour <= totalHours + 0.001; hour += step.intervalHours) {
         double x = LEFT_MARGIN + hour * pixelsPerHour;
-        QDateTime dt = sceneStartTime.addSecs(hour * 3600);
-        topScene->addLine(x, 0, x, 40, hourPen);
-        QGraphicsTextItem *text = topScene->addText(dt.toString("HH:00"));
-        text->setPos(x + 2, 2);
-        if (hour < 24) {
-            for (int q = 1; q <= 3; ++q) {
-                double xm = x + q * pixelsPerQuarter;
-                topScene->addLine(xm, 25, xm, 40, minutePen);
+        QDateTime dt = sceneStartTime.addSecs(qRound64(hour * 3600));
+
+        topScene->addLine(x, 0, x, 40, mainPen);
+        if (x - lastLabelX >= step.minLabelSpacePx) {
+            QGraphicsTextItem *text = topScene->addText(dt.toString(step.format));
+            text->setPos(x + 2, 2);
+            lastLabelX = x;
+        }
+
+        if (step.subDivisions > 1 && hour + subStep <= totalHours) {
+            for (int i = 1; i < step.subDivisions; ++i) {
+                double subHour = hour + i * subStep;
+                if (subHour > totalHours + 0.001) break;
+                double xs = LEFT_MARGIN + subHour * pixelsPerHour;
+                topScene->addLine(xs, 25, xs, 40, subPen);
             }
         }
     }
 }
 
 void TimelineView::drawBottomGrid() {
-    double pixelsPerQuarter = pixelsPerHour / 4.0;
-    QPen hourPen(Qt::gray, 1.5);
-    QPen minutePen(Qt::lightGray, 1, Qt::DashLine);
-    for (int hour = 0; hour <= 24; ++hour) {
+    TimeScaleStep step = calculateTimeScaleStep(pixelsPerHour);
+    double totalHours = 24.0;
+    double subStep = step.intervalHours / step.subDivisions;
+
+    QPen mainPen(Qt::gray, 1.5);
+    QPen subPen(Qt::lightGray, 1, Qt::DashLine);
+
+    for (double hour = 0.0; hour <= totalHours + 0.001; hour += step.intervalHours) {
         double x = LEFT_MARGIN + hour * pixelsPerHour;
-        bottomScene->addLine(x, 0, x, bottomScene->height(), hourPen);
-        if (hour < 24) {
-            for (int q = 1; q <= 3; ++q) {
-                double xm = x + q * pixelsPerQuarter;
-                bottomScene->addLine(xm, 0, xm, bottomScene->height(), minutePen);
+        bottomScene->addLine(x, 0, x, bottomScene->height(), mainPen);
+
+        if (step.subDivisions > 1 && hour + subStep <= totalHours) {
+            for (int i = 1; i < step.subDivisions; ++i) {
+                double subHour = hour + i * subStep;
+                if (subHour > totalHours + 0.001) break;
+                double xs = LEFT_MARGIN + subHour * pixelsPerHour;
+                bottomScene->addLine(xs, 0, xs, bottomScene->height(), subPen);
             }
         }
     }
 }
 
 void TimelineView::drawProjectsAndTasks() {
-    double totalWidth = LEFT_MARGIN + 24 * pixelsPerHour + 50;
+    double totalWidth = LEFT_MARGIN + 24 * pixelsPerHour;
     for (int p = 0; p < model->projectCount(); ++p) {
         double y = p * ROW_HEIGHT;
         bottomScene->addRect(0, y, totalWidth, ROW_HEIGHT-10, QPen(Qt::lightGray), QBrush(QColor(240, 240, 240)));
@@ -168,6 +219,7 @@ void TimelineView::onAddProject() {
         }, Qt::QueuedConnection);
     }
 }
+
 void TimelineView::mouseDoubleClickEvent(QMouseEvent *event) {
     QPoint viewPos = bottomView->mapFromGlobal(event->globalPos());
     if (!bottomView->rect().contains(viewPos)) {
@@ -187,6 +239,7 @@ void TimelineView::mouseDoubleClickEvent(QMouseEvent *event) {
     deleteTempTask();
     createTempTask(projectIdx, start, end);
 }
+
 QDateTime TimelineView::getTimeFromScenePos(const QPointF &scenePos) const {
     double x = scenePos.x() - LEFT_MARGIN;
     x = qBound(0.0, x, 24.0 * pixelsPerHour);
@@ -223,6 +276,7 @@ void TimelineView::deleteTempTask() {
         tempTask = nullptr;
     }
 }
+
 void TimelineView::cancelTempTask(GraphicsTaskItem *item) {
     if (item && item == tempTask) {
         delete tempTask;
@@ -235,6 +289,7 @@ int TimelineView::getProjectIndexAtY(double sceneY) const {
     if (idx >= 0 && idx < model->projectCount()) return idx;
     return -1;
 }
+
 void TimelineView::onSave() {
     QString fileName = QFileDialog::getSaveFileName(this, "Сохранить таск-борд", "",
                                                     "JSON files (*.json);;All files (*)");
@@ -253,4 +308,43 @@ void TimelineView::onLoad() {
         QMessageBox::warning(this, "Ошибка", "Не удалось загрузить файл!");
     else
         QMessageBox::information(this, "Успех", "Таск-борд загружен.");
+}
+
+void TimelineView::wheelEvent(QWheelEvent *event) {
+    if (event->modifiers() & Qt::ControlModifier) {
+        double factor = (event->angleDelta().y() > 0) ? 1.2 : 1.0/1.2;
+        double newValue = pixelsPerHour * factor;
+        newValue = qBound(MIN_PIXELS_PER_HOUR, newValue, MAX_PIXELS_PER_HOUR);
+        if (qFuzzyCompare(pixelsPerHour, newValue)) return;
+
+        QPointF scenePos = bottomView->mapToScene(bottomView->mapFromGlobal(event->globalPos()));
+        double hourUnderCursor = (scenePos.x() - LEFT_MARGIN) / pixelsPerHour;
+
+        pixelsPerHour = newValue;
+        refresh();
+
+        double newX = hourUnderCursor * pixelsPerHour + LEFT_MARGIN;
+        bottomView->horizontalScrollBar()->setValue(newX - bottomView->viewport()->width()/2);
+        event->accept();
+    } else {
+        QWidget::wheelEvent(event);
+    }
+}
+
+void TimelineView::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    int availableWidth = bottomView->viewport()->width() - LEFT_MARGIN;
+    if (availableWidth <= 0) return;
+
+    double desired = static_cast<double>(availableWidth) / 24.0;
+    double newPixelsPerHour = qBound(MIN_PIXELS_PER_HOUR, desired, MAX_PIXELS_PER_HOUR);
+    if (qFuzzyCompare(pixelsPerHour, newPixelsPerHour)) return;
+
+    double centerHour = (bottomView->horizontalScrollBar()->value() + bottomView->viewport()->width()/2.0) / pixelsPerHour;
+
+    pixelsPerHour = newPixelsPerHour;
+    refresh();
+
+    int newPos = centerHour * pixelsPerHour - bottomView->viewport()->width()/2;
+    bottomView->horizontalScrollBar()->setValue(qMax(0, newPos));
 }

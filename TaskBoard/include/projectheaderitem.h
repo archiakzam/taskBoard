@@ -2,6 +2,7 @@
 #define PROJECTHEADERITEM_H
 #include "taskboard.h"
 #include <QGraphicsRectItem>
+#include <QPainter>
 
 class ProjectHeaderItem : public QGraphicsRectItem
 {
@@ -12,11 +13,10 @@ public:
 protected:
     void contextMenuEvent(QGraphicsSceneContextMenuEvent *event) override;
     void mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event) override;
-
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
 private:
     int projectId;
     TaskBoardModel *model;
-    QGraphicsTextItem *label;
 };
 
 #endif // PROJECTHEADERITEM_H
